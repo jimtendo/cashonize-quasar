@@ -1,6 +1,9 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { Dialog, Notify } from "quasar";
+
+// Import the store.
+import { useStore } from "src/stores/store.js";
 
 // Components.
 import CCSessionProposalDialogVue from "src/components/cashconnect/CCSessionProposalDialog.vue";
@@ -29,10 +32,23 @@ import {
 
 // NOTE: We use a wrapper so that we can pass in the Mainnet Wallet as an argument.
 //       This keeps the mutable state more managable in the sense that CC cannot exist with a valid wallet.
-export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
+export const useCashconnectStore = async (
+  // How you want to handle this up to you.
+  // I'm passing the whole store in as I suspect you'll also want to invoke Change Network or something from here.
+  // But you could pass store.wallet in directly and wrap it in a computed so it remains reactive.
+  // And then also pass the change network func as a callback.
+  mainStore: ReturnType<typeof useStore>
+) => {
   const store = defineStore("cashconnectStore", () => {
+    // Store a state variable to make sure we don't call "start" more than once.
+    const isStarted = ref(false);
+
+    // I haven't used Pinia stores for a while and can't remember how they track reactivity.
+    // But wrapping in computed will ensure this remains reactive (but it might not be necessary because we are using the store directly).
+    const wallet = computed(() => mainStore.wallet as Wallet | TestNetWallet);
+
     // Ensure that the Mainnet Wallet has a Private Key.
-    if (!wallet.privateKey) {
+    if (!wallet.value.privateKey) {
       throw new Error(
         "Failed to create store: Mainnet wallet.privateKey is undefined"
       );
@@ -55,7 +71,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
     const cashConnectWallet = ref<CashConnectWallet>(
       new CashConnectWallet(
         // The master private key.
-        wallet.privateKey,
+        wallet.value.privateKey,
         // Project ID.
         "3fd234b8e2cd0e1da4bc08a0011bbf64",
         // Metadata.
@@ -88,6 +104,20 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
       )
     );
 
+    async function start() {
+      // Make sure we don't start CC more than once.
+      // Otherwise, we'll register multiple handlers and end up with multiple dialgos.
+      if (isStarted.value) {
+        return;
+      }
+
+      // Start CashConnect (WC Core) service.
+      await cashConnectWallet.value.start();
+
+      // Set our state variable so we don't start it again when switching wallets.
+      isStarted.value = true;
+    }
+
     async function pair(wcUri: string) {
       try {
         // Pair with the service.
@@ -115,7 +145,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
 
       // NOTE: The walletClass.network property appears to return quirky values (e.g. undefined).
       //       So we use the networkPrefix property to determine which chain we are currently on.
-      const currentChain = wallet.networkPrefix;
+      const currentChain = wallet.value.networkPrefix;
       const targetChain =
         sessionProposal.params.requiredNamespaces.bch.chains?.[0].replace(
           "bch:",
@@ -200,8 +230,6 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
     }
 
     async function onError(error: Error): Promise<void> {
-      console.error(error);
-
       return await new Promise<void>((resolve) => {
         Dialog.create({
           component: CCErrorDialogVue,
@@ -222,11 +250,11 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
       outpointTransactionHash: Uint8Array,
       outpointIndex: number
     ): Promise<Output> {
-      if (!wallet.provider) {
+      if (!wallet.value.provider) {
         throw new Error("Wallet Provider is undefined");
       }
 
-      const transaction = await wallet.provider.getRawTransactionObject(
+      const transaction = await wallet.value.provider.getRawTransactionObject(
         binToHex(outpointTransactionHash)
       );
 
@@ -255,13 +283,15 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
     }
 
     async function getUnspents(): Promise<Array<Unspent>> {
-      if (!wallet.cashaddr) {
+      if (!wallet.value.cashaddr) {
         throw new Error('Wallet "cashaddr" is not available.');
       }
 
-      const utxos = await wallet.getUtxos();
+      const utxos = await wallet.value.getUtxos();
 
-      const lockingBytecode = cashAddressToLockingBytecode(wallet.cashaddr);
+      const lockingBytecode = cashAddressToLockingBytecode(
+        wallet.value.cashaddr
+      );
 
       if (typeof lockingBytecode === "string") {
         throw new Error("Failed to convert CashAddr to Locking Bytecode");
@@ -296,7 +326,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
             data: {
               keys: {
                 privateKeys: {
-                  key: wallet.privateKey,
+                  key: wallet.value.privateKey,
                 },
               },
             },
@@ -309,7 +339,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
     }
 
     async function getChangeTemplate() {
-      if (!wallet.privateKey) {
+      if (!wallet.value.privateKey) {
         throw new Error(
           "Failed to getChangeTemplate: Mainnet wallet.privateKey is undefined"
         );
@@ -320,7 +350,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
         data: {
           keys: {
             privateKeys: {
-              key: wallet.privateKey,
+              key: wallet.value.privateKey,
             },
           },
         },
@@ -333,6 +363,7 @@ export const useCashconnectStore = async (wallet: Wallet | TestNetWallet) => {
 
     return {
       // Methods
+      start,
       pair,
 
       // Properties

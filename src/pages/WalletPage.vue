@@ -67,7 +67,7 @@
     // Initialize WalletConnect and CashConnect.
     // NOTE: We do these in parallel as they have no dependency on each other and it speeds initialization up.
     console.time('initialize walletconnect and cashconnect');
-    await Promise.all([initializeWalletConnect(), initializeCashConnect(newWallet)]);
+    await Promise.all([initializeWalletConnect(), initializeCashConnect()]);
     console.timeEnd('initialize walletconnect and cashconnect');
 
     // fetch bch balance
@@ -108,12 +108,12 @@
     }
   }
 
-  async function initializeCashConnect(wallet: TestNetWallet) {
+  async function initializeCashConnect() {
     // Initialize CashConnect.
-    const cashconnectWallet = await useCashconnectStore(wallet);
+    const cashconnectWallet = await useCashconnectStore(store);
 
     // Start the wallet service.
-    await cashconnectWallet.cashConnectWallet.start();
+    await cashconnectWallet.start();
 
     // Check if session request in URL params
     if(props?.uri?.startsWith('cc:')){
@@ -121,9 +121,9 @@
     }
 
     // Monitor the wallet for balance changes.
-    wallet.watchBalance(async () => {
+    store.wallet?.watchBalance(async () => {
       // Convert the network into WC format,
-      const chainIdFormatted = wallet.network === 'mainnet' ? 'bch:bitcoincash' : 'bch:bchtest';
+      const chainIdFormatted = store.wallet?.network === 'mainnet' ? 'bch:bitcoincash' : 'bch:bchtest';
 
       // Invoke wallet state has changed so that CashConnect can retrieve fresh UTXOs (and token balances).
       cashconnectWallet.cashConnectWallet.walletStateHasChanged(chainIdFormatted);
